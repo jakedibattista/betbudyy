@@ -38,7 +38,7 @@ class OddsService:
                 params = {
                     "apiKey": self.api_key,
                     "regions": "us",
-                    "markets": "h2h",
+                    "markets": "h2h,spreads,totals",
                     "dateFormat": "iso",
                     "oddsFormat": "american"
                 }

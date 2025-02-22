@@ -132,6 +132,9 @@
                             <div class="game-card">
                                 <h3>${game.away_team} @ ${game.home_team}</h3>
                                 <p>Start Time: ${formatDateTime(game.start_time)}</p>
+                                
+                                <!-- Moneyline Odds -->
+                                <h4>Moneyline</h4>
                                 <table class="odds-table">
                                     <tr>
                                         <th>Team</th>
@@ -140,13 +143,59 @@
                                     </tr>
                                     <tr>
                                         <td>${game.home_team}</td>
-                                        <td class="best-odds">${formatOdds(game.odds.home[0].odds)}</td>
-                                        <td>${game.odds.home[0].book}</td>
+                                        <td class="best-odds">${formatOdds(game.odds.moneyline.home[0].odds)}</td>
+                                        <td>${game.odds.moneyline.home[0].book}</td>
                                     </tr>
                                     <tr>
                                         <td>${game.away_team}</td>
-                                        <td class="best-odds">${formatOdds(game.odds.away[0].odds)}</td>
-                                        <td>${game.odds.away[0].book}</td>
+                                        <td class="best-odds">${formatOdds(game.odds.moneyline.away[0].odds)}</td>
+                                        <td>${game.odds.moneyline.away[0].book}</td>
+                                    </tr>
+                                </table>
+                                
+                                <!-- Best Point Spreads -->
+                                <h4>Best Point Spreads</h4>
+                                <table class="odds-table">
+                                    <tr>
+                                        <th>Team</th>
+                                        <th>Spread</th>
+                                        <th>Odds</th>
+                                        <th>Sportsbook</th>
+                                    </tr>
+                                    <tr>
+                                        <td>${game.home_team}</td>
+                                        <td>${game.odds.spreads.home.point}</td>
+                                        <td class="best-odds">${formatOdds(game.odds.spreads.home.price)}</td>
+                                        <td>${game.odds.spreads.home.book}</td>
+                                    </tr>
+                                    <tr>
+                                        <td>${game.away_team}</td>
+                                        <td>${game.odds.spreads.away.point}</td>
+                                        <td class="best-odds">${formatOdds(game.odds.spreads.away.price)}</td>
+                                        <td>${game.odds.spreads.away.book}</td>
+                                    </tr>
+                                </table>
+                                
+                                <!-- Best Over/Under -->
+                                <h4>Best Over/Under</h4>
+                                <table class="odds-table">
+                                    <tr>
+                                        <th>Type</th>
+                                        <th>Total</th>
+                                        <th>Odds</th>
+                                        <th>Sportsbook</th>
+                                    </tr>
+                                    <tr>
+                                        <td>Over</td>
+                                        <td>${game.odds.totals.over.total}</td>
+                                        <td class="best-odds">${formatOdds(game.odds.totals.over.odds)}</td>
+                                        <td>${game.odds.totals.over.book}</td>
+                                    </tr>
+                                    <tr>
+                                        <td>Under</td>
+                                        <td>${game.odds.totals.under.total}</td>
+                                        <td class="best-odds">${formatOdds(game.odds.totals.under.odds)}</td>
+                                        <td>${game.odds.totals.under.book}</td>
                                     </tr>
                                 </table>
                             </div>

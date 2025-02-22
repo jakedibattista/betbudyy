@@ -77,15 +77,21 @@ async def available_games():
         if odds and len(odds) > 0:
             games = []
             for game in odds:
-                # Track odds history (you'll need to store this in a database for production)
                 game_id = game['id']
                 current_time = datetime.now().isoformat()
                 
+                # Process moneyline odds
                 home_odds = []
                 away_odds = []
+                # Process spread odds
+                spreads = []
+                # Process totals
+                totals = []
+                
                 for book in game.get('bookmakers', []):
                     for market in book.get('markets', []):
                         if market['key'] == 'h2h':
+                            # Process moneyline odds as before
                             for outcome in market['outcomes']:
                                 if outcome['name'] == game['home_team']:
                                     home_odds.append({
@@ -99,22 +105,86 @@ async def available_games():
                                         'odds': outcome['price'],
                                         'timestamp': current_time
                                     })
+                        elif market['key'] == 'spreads':
+                            # Process point spreads
+                            spreads.append({
+                                'book': book['key'],
+                                'home': next((o for o in market['outcomes'] 
+                                            if o['name'] == game['home_team']), None),
+                                'away': next((o for o in market['outcomes'] 
+                                            if o['name'] == game['away_team']), None),
+                                'timestamp': current_time
+                            })
+                        elif market['key'] == 'totals':
+                            # Process over/under totals
+                            totals.append({
+                                'book': book['key'],
+                                'total': market['outcomes'][0]['point'],
+                                'over_odds': next((o['price'] for o in market['outcomes'] 
+                                                 if o['name'] == 'Over'), None),
+                                'under_odds': next((o['price'] for o in market['outcomes'] 
+                                                  if o['name'] == 'Under'), None),
+                                'timestamp': current_time
+                            })
                 
-                # Get longest odds for either team
-                longest_home_odds = max(home_odds, key=lambda x: x['odds'])['odds'] if home_odds else 0
-                longest_away_odds = max(away_odds, key=lambda x: x['odds'])['odds'] if away_odds else 0
-                longest_odds = max(longest_home_odds, longest_away_odds)
-                
+                # Get best spread for each team (lowest spread with best odds)
+                best_spreads = {
+                    'home': None,
+                    'away': None
+                }
+                for spread in spreads:
+                    if spread['home'] and spread['away']:
+                        if (not best_spreads['home'] or 
+                            (spread['home']['point'] > best_spreads['home']['point'] or 
+                             (spread['home']['point'] == best_spreads['home']['point'] and 
+                              spread['home']['price'] > best_spreads['home']['price']))):
+                            best_spreads['home'] = {
+                                'point': spread['home']['point'],
+                                'price': spread['home']['price'],
+                                'book': spread['book']
+                            }
+                        if (not best_spreads['away'] or 
+                            (spread['away']['point'] > best_spreads['away']['point'] or 
+                             (spread['away']['point'] == best_spreads['away']['point'] and 
+                              spread['away']['price'] > best_spreads['away']['price']))):
+                            best_spreads['away'] = {
+                                'point': spread['away']['point'],
+                                'price': spread['away']['price'],
+                                'book': spread['book']
+                            }
+
+                # Get best total (highest over odds and lowest under odds)
+                best_total = {
+                    'over': None,
+                    'under': None
+                }
+                for total in totals:
+                    if (not best_total['over'] or total['over_odds'] > best_total['over']['odds']):
+                        best_total['over'] = {
+                            'total': total['total'],
+                            'odds': total['over_odds'],
+                            'book': total['book']
+                        }
+                    if (not best_total['under'] or total['under_odds'] > best_total['under']['odds']):
+                        best_total['under'] = {
+                            'total': total['total'],
+                            'odds': total['under_odds'],
+                            'book': total['book']
+                        }
+
                 games.append({
                     "id": game_id,
                     "home_team": game['home_team'],
                     "away_team": game['away_team'],
                     "start_time": game['commence_time'],
                     "sport": game['sport_title'],
-                    "longest_odds": longest_odds,  # Renamed from best_odds
                     "odds": {
-                        "home": sorted(home_odds, key=lambda x: x['odds'], reverse=True)[:3],
-                        "away": sorted(away_odds, key=lambda x: x['odds'], reverse=True)[:3]
+                        "moneyline": {
+                            "home": sorted(home_odds, key=lambda x: x['odds'], reverse=True)[:3],
+                            "away": sorted(away_odds, key=lambda x: x['odds'], reverse=True)[:3]
+                        },
+                        "spreads": best_spreads,
+                        "totals": best_total
                     }
                 })
             
@@ -124,7 +194,7 @@ async def available_games():
                 games.sort(key=lambda x: x['start_time'])
             elif sort_by == 'odds':
                 # Sort by the best available odds for either team
-                games.sort(key=lambda x: x['longest_odds'], reverse=True)
+                games.sort(key=lambda x: x['odds'], reverse=True)
             
             # Filter by team if requested
             team_filter = request.args.get('team', '').lower()
