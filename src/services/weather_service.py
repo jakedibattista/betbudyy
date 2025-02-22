@@ -5,164 +5,197 @@ import os
 
 class WeatherService:
     def __init__(self):
-        self.base_url = "https://api.weather.gov"
-        # NWS API requires a User-Agent header
-        self.headers = {
-            "User-Agent": "BetBuddy/1.0 (https://github.com/yourusername/betbuddy)",
-            "Accept": "application/geo+json"
-        }
-    
-    async def get_forecast(self, city: str, game_date: str) -> Optional[Dict[str, Any]]:
-        """Get weather forecast for a location and specific date"""
+        self.api_key = os.getenv("WEATHER_API_KEY")
+        if not self.api_key:
+            print("WARNING: WEATHER_API_KEY not found in environment variables")
+        else:
+            print(f"Weather API Key loaded: {self.api_key[:10]}...")  # Debug print
+        self.base_url = "https://api.openweathermap.org/data/2.5"
+
+    async def _get_forecast(self, lat: float, lon: float) -> Optional[Dict[str, Any]]:
+        """Get current weather for coordinates"""
         try:
-            print(f"Getting stadium info for: {city}")  # Debug print
+            params = {
+                "lat": lat,
+                "lon": lon,
+                "appid": self.api_key,
+                "units": "imperial"  # Use Fahrenheit
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                url = f"{self.base_url}/weather"
+                print(f"Making weather request to: {url}")
+                async with session.get(url, params=params) as response:
+                    if response.status != 200:
+                        print(f"Weather API error: {await response.text()}")
+                        return None
+                        
+                    data = await response.json()
+                    return {
+                        "temperature": round(data['main']['temp']),
+                        "description": data['weather'][0]['description'],
+                        "humidity": data['main']['humidity'],
+                        "wind_speed": round(data['wind']['speed'])
+                    }
+                    
+        except Exception as e:
+            print(f"Error getting forecast: {e}")
+            return None
+
+    def _get_stadium_info(self, city: str) -> Optional[Tuple[Tuple[float, float], bool, str]]:
+        """Get stadium coordinates and indoor/outdoor status"""
+        stadiums = {
+            # MLB Stadiums
+            "boston": ((42.3467, -71.0972), False, "Fenway Park"),
+            "new york yankees": ((40.8296, -73.9262), False, "Yankee Stadium"),
+            "tampa bay": ((27.7682, -82.6534), True, "Tropicana Field"),
+            "baltimore": ((39.2838, -76.6215), False, "Oriole Park at Camden Yards"),
+            "toronto": ((43.6416, -79.3891), True, "Rogers Centre"),
+            "chicago cubs": ((41.9484, -87.6553), False, "Wrigley Field"),
+            "chicago white sox": ((41.8299, -87.6338), False, "Guaranteed Rate Field"),
+            "houston": ((29.7573, -95.3555), True, "Minute Maid Park"),
+            "la angels": ((33.8003, -117.8827), False, "Angel Stadium"),
+            "la dodgers": ((34.0739, -118.2400), False, "Dodger Stadium"),
+            "san francisco": ((37.7786, -122.3893), False, "Oracle Park"),
+            "oakland": ((37.7516, -122.2005), False, "Oakland Coliseum"),
+            "seattle": ((47.5915, -122.3317), True, "T-Mobile Park"),
+            "texas": ((32.7512, -97.0832), True, "Globe Life Field"),
+            "arizona": ((33.4453, -112.0667), True, "Chase Field"),
+            
+            # NFL Stadiums (Outdoor)
+            "green bay": ((44.5013, -88.0622), False, "Lambeau Field"),
+            "buffalo": ((42.7738, -78.7870), False, "Highmark Stadium"),
+            "miami": ((25.9580, -80.2389), False, "Hard Rock Stadium"),
+            "kansas city": ((39.0489, -94.4839), False, "Arrowhead Stadium"),
+            "chicago": ((41.8623, -87.6167), False, "Soldier Field"),
+            
+            # NFL Stadiums (Indoor)
+            "dallas": ((32.7473, -97.0945), True, "AT&T Stadium"),
+            "detroit": ((42.3400, -83.0456), True, "Ford Field"),
+            "minnesota": ((44.9736, -93.2575), True, "U.S. Bank Stadium"),
+            
+            # NBA Stadiums (All Indoor)
+            "phoenix": ((33.4457, -112.0712), True, "Footprint Center"),
+            "brooklyn": ((40.6828, -73.9758), True, "Barclays Center"),
+            "philadelphia": ((39.9012, -75.1720), True, "Wells Fargo Center"),
+            "denver": ((39.7487, -105.0077), True, "Ball Arena"),
+            "chicago": ((41.8807, -87.6742), True, "United Center"),
+            
+            # MLB Stadiums (All Outdoor except noted)
+            "boston": ((42.3467, -71.0972), False, "Fenway Park"),
+            "new york": ((40.8296, -73.9262), False, "Yankee Stadium"),
+            "san francisco": ((37.7786, -122.3893), False, "Oracle Park"),
+            "chicago cubs": ((41.9484, -87.6553), False, "Wrigley Field"),
+            "chicago sox": ((41.8299, -87.6338), False, "Guaranteed Rate Field"),
+            "los angeles": ((34.0739, -118.2400), False, "Dodger Stadium"),
+            "st louis": ((38.6226, -90.1928), False, "Busch Stadium"),
+            "houston": ((29.7573, -95.3555), True, "Minute Maid Park"),  # Retractable roof
+            "arizona": ((33.4453, -112.0667), True, "Chase Field"),  # Retractable roof
+            "toronto": ((43.6416, -79.3891), True, "Rogers Centre"),  # Retractable roof
+            "seattle": ((47.5915, -122.3317), True, "T-Mobile Park"),  # Retractable roof
+            "atlanta": ((33.8907, -84.4677), False, "Truist Park"),
+            "cincinnati": ((39.0979, -84.5088), False, "Great American Ball Park"),
+            "cleveland": ((41.4962, -81.6852), False, "Progressive Field"),
+            "colorado": ((39.7559, -104.9942), False, "Coors Field")
+        }
+        
+        stadium = stadiums.get(city.lower())
+        if not stadium:
+            print(f"Stadium not found for city: {city}")
+            print(f"Available cities: {', '.join(stadiums.keys())}")
+        return stadium
+
+    def _get_team_city(self, team_name: str) -> Optional[str]:
+        """Convert team name to city"""
+        team_cities = {
+            # MLB Teams
+            "Boston Red Sox": "boston",
+            "New York Yankees": "new york yankees",
+            "Tampa Bay Rays": "tampa bay",
+            "Baltimore Orioles": "baltimore",
+            "Toronto Blue Jays": "toronto",
+            "Chicago Cubs": "chicago cubs",
+            "Chicago White Sox": "chicago white sox",
+            "Houston Astros": "houston",
+            "Los Angeles Angels": "la angels",
+            "Los Angeles Dodgers": "la dodgers",
+            "San Francisco Giants": "san francisco",
+            "Oakland Athletics": "oakland",
+            "Seattle Mariners": "seattle",
+            "Texas Rangers": "texas",
+            "Arizona Diamondbacks": "arizona",
+            
+            # NBA Teams
+            "Phoenix Suns": "phoenix",
+            "Brooklyn Nets": "brooklyn",
+            "Philadelphia 76ers": "philadelphia",
+            "Los Angeles Lakers": "los angeles",
+            "Denver Nuggets": "denver",
+            "Chicago Bulls": "chicago",
+            
+            # NFL Teams
+            "Green Bay Packers": "green bay",
+            "Buffalo Bills": "buffalo",
+            "Miami Dolphins": "miami",
+            "Kansas City Chiefs": "kansas city",
+            "Chicago Bears": "chicago",
+            "Dallas Cowboys": "dallas",
+        }
+        
+        return team_cities.get(team_name)
+
+    async def get_stadium_weather(self, team_name: str, game_date: str) -> Optional[Dict[str, Any]]:
+        """Get weather for stadium location"""
+        try:
+            print(f"\n=== Weather Request Debug ===")
+            print(f"Team name: {team_name}")
+            print(f"API Key: {self.api_key[:10]}...")
+            
+            city = self._get_team_city(team_name)
+            print(f"Mapped city: {city}")
+            
+            if not city:
+                print(f"❌ Could not determine city for team: {team_name}")
+                return None
+                
+            print(f"Looking up stadium for city: {city}")
             stadium_info = self._get_stadium_info(city)
             if not stadium_info:
-                print(f"No stadium found for {city}")
+                print(f"❌ No stadium found for city: {city}")
                 return None
                 
             coords, is_indoor, stadium_name = stadium_info
-            print(f"Found stadium: {stadium_name} (Indoor: {is_indoor})")  # Debug print
+            print(f"✓ Found stadium: {stadium_name}")
+            print(f"✓ Coordinates: {coords}")
+            print(f"✓ Indoor: {is_indoor}")
             
             # Return controlled environment for indoor stadiums
             if is_indoor:
+                print("Indoor stadium - returning controlled environment")
                 return {
-                    "temperature": 70,
-                    "humidity": 50,
-                    "wind_speed": 0,
-                    "conditions": "Indoor Stadium",
-                    "description": f"Climate controlled environment at {stadium_name}",
-                    "forecast_time": game_date,
+                    "stadium": stadium_name,
                     "is_indoor": True,
-                    "stadium": stadium_name
+                    "description": "Climate controlled indoor stadium",
+                    "temperature": 72,  # Standard indoor temp
+                    "humidity": 45,     # Standard indoor humidity
+                    "wind_speed": 0
                 }
             
-            # Get outdoor forecast
-            async with aiohttp.ClientSession(headers=self.headers) as session:
-                lat, lon = coords
-                points_url = f"{self.base_url}/points/{lat},{lon}"
-                async with session.get(points_url) as response:
-                    points_data = await response.json()
-                    forecast_url = points_data['properties']['forecast']
-                    async with session.get(forecast_url) as response:
-                        forecast = await response.json()
-                        game_dt = datetime.fromisoformat(game_date.replace('Z', '+00:00'))
-                        
-                        for period in forecast['properties']['periods']:
-                            start_time = datetime.fromisoformat(period['startTime'])
-                            end_time = datetime.fromisoformat(period['endTime'])
-                            
-                            if start_time <= game_dt <= end_time:
-                                return {
-                                    "temperature": period['temperature'],
-                                    "humidity": period.get('relativeHumidity', {}).get('value', 0),
-                                    "wind_speed": int(period['windSpeed'].split()[0]),
-                                    "conditions": period['shortForecast'],
-                                    "description": period['detailedForecast'],
-                                    "forecast_time": period['startTime'],
-                                    "is_indoor": False,
-                                    "stadium": stadium_name
-                                }
-                        
-                        return {
-                            "temperature": forecast['properties']['periods'][0]['temperature'],
-                            "humidity": forecast['properties']['periods'][0].get('relativeHumidity', {}).get('value', 0),
-                            "wind_speed": int(forecast['properties']['periods'][0]['windSpeed'].split()[0]),
-                            "conditions": forecast['properties']['periods'][0]['shortForecast'],
-                            "description": forecast['properties']['periods'][0]['detailedForecast'],
-                            "forecast_time": forecast['properties']['periods'][0]['startTime'],
-                            "note": "Exact game time forecast not available yet",
-                            "is_indoor": False,
-                            "stadium": stadium_name
-                        }
-                    
-        except Exception as e:
-            print(f"Error getting weather forecast: {e}")
+            # Get outdoor weather forecast
+            lat, lon = coords
+            print(f"Getting forecast for coordinates: {lat}, {lon}")
+            forecast = await self._get_forecast(lat, lon)
+            if forecast:
+                print(f"Got forecast: {forecast}")
+                return {
+                    "stadium": stadium_name,
+                    "is_indoor": False,
+                    **forecast
+                }
+            
             return None
             
-    def _get_stadium_info(self, city: str) -> Optional[Tuple[Tuple[float, float], bool, str]]:
-        """Get stadium coordinates, indoor/outdoor status, and name"""
-        # Format: (latitude, longitude), is_indoor, stadium_name
-        stadiums = {
-            # AFC East
-            "bills": ((42.7738, -78.7870), False, "Highmark Stadium"),
-            "dolphins": ((25.9580, -80.2389), False, "Hard Rock Stadium"),
-            "patriots": ((42.0909, -71.2643), False, "Gillette Stadium"),
-            "jets": ((40.8135, -74.0745), False, "MetLife Stadium"),
-            
-            # AFC North
-            "ravens": ((39.2780, -76.6227), False, "M&T Bank Stadium"),
-            "bengals": ((39.0955, -84.5161), False, "Paycor Stadium"),
-            "browns": ((41.5061, -81.6995), False, "Cleveland Browns Stadium"),
-            "steelers": ((40.4468, -80.0158), False, "Acrisure Stadium"),
-            
-            # AFC South
-            "texans": ((29.6847, -95.4107), True, "NRG Stadium"),
-            "colts": ((39.7601, -86.1639), True, "Lucas Oil Stadium"),
-            "jaguars": ((30.3239, -81.6373), False, "TIAA Bank Field"),
-            "titans": ((36.1665, -86.7713), False, "Nissan Stadium"),
-            
-            # AFC West
-            "broncos": ((39.7439, -105.0201), False, "Empower Field at Mile High"),
-            "chiefs": ((39.0489, -94.4839), False, "GEHA Field at Arrowhead Stadium"),
-            "raiders": ((36.0909, -115.1833), True, "Allegiant Stadium"),
-            "chargers": ((33.9534, -118.3387), True, "SoFi Stadium"),
-            
-            # NFC East
-            "cowboys": ((32.7473, -97.0945), True, "AT&T Stadium"),
-            "giants": ((40.8135, -74.0745), False, "MetLife Stadium"),
-            "eagles": ((39.9013, -75.1674), False, "Lincoln Financial Field"),
-            "commanders": ((38.9077, -76.8645), False, "FedExField"),
-            
-            # NFC North
-            "bears": ((41.8623, -87.6167), False, "Soldier Field"),
-            "lions": ((42.3400, -83.0456), True, "Ford Field"),
-            "packers": ((44.5013, -88.0622), False, "Lambeau Field"),
-            "vikings": ((44.9736, -93.2575), True, "U.S. Bank Stadium"),
-            
-            # NFC South
-            "falcons": ((33.7555, -84.4011), True, "Mercedes-Benz Stadium"),
-            "panthers": ((35.2258, -80.8528), False, "Bank of America Stadium"),
-            "saints": ((29.9511, -90.0815), True, "Caesars Superdome"),
-            "buccaneers": ((27.9759, -82.5033), False, "Raymond James Stadium"),
-            
-            # NFC West
-            "cardinals": ((33.5276, -112.2626), True, "State Farm Stadium"),
-            "rams": ((33.9534, -118.3387), True, "SoFi Stadium"),
-            "49ers": ((37.4033, -121.9694), False, "Levi's Stadium"),
-            "seahawks": ((47.5952, -122.3316), False, "Lumen Field"),
-            
-            # Common city names
-            "arizona": ((33.5276, -112.2626), True, "State Farm Stadium"),
-            "atlanta": ((33.7555, -84.4011), True, "Mercedes-Benz Stadium"),
-            "baltimore": ((39.2780, -76.6227), False, "M&T Bank Stadium"),
-            "buffalo": ((42.7738, -78.7870), False, "Highmark Stadium"),
-            "carolina": ((35.2258, -80.8528), False, "Bank of America Stadium"),
-            "chicago": ((41.8623, -87.6167), False, "Soldier Field"),
-            "cincinnati": ((39.0955, -84.5161), False, "Paycor Stadium"),
-            "cleveland": ((41.5061, -81.6995), False, "Cleveland Browns Stadium"),
-            "dallas": ((32.7473, -97.0945), True, "AT&T Stadium"),
-            "denver": ((39.7439, -105.0201), False, "Empower Field at Mile High"),
-            "detroit": ((42.3400, -83.0456), True, "Ford Field"),
-            "green bay": ((44.5013, -88.0622), False, "Lambeau Field"),
-            "houston": ((29.6847, -95.4107), True, "NRG Stadium"),
-            "indianapolis": ((39.7601, -86.1639), True, "Lucas Oil Stadium"),
-            "jacksonville": ((30.3239, -81.6373), False, "TIAA Bank Field"),
-            "kansas city": ((39.0489, -94.4839), False, "GEHA Field at Arrowhead Stadium"),
-            "las vegas": ((36.0909, -115.1833), True, "Allegiant Stadium"),
-            "los angeles": ((33.9534, -118.3387), True, "SoFi Stadium"),
-            "miami": ((25.9580, -80.2389), False, "Hard Rock Stadium"),
-            "minnesota": ((44.9736, -93.2575), True, "U.S. Bank Stadium"),
-            "new england": ((42.0909, -71.2643), False, "Gillette Stadium"),
-            "new orleans": ((29.9511, -90.0815), True, "Caesars Superdome"),
-            "new york": ((40.8135, -74.0745), False, "MetLife Stadium"),
-            "philadelphia": ((39.9013, -75.1674), False, "Lincoln Financial Field"),
-            "pittsburgh": ((40.4468, -80.0158), False, "Acrisure Stadium"),
-            "san francisco": ((37.4033, -121.9694), False, "Levi's Stadium"),
-            "seattle": ((47.5952, -122.3316), False, "Lumen Field"),
-            "tampa bay": ((27.9759, -82.5033), False, "Raymond James Stadium"),
-            "tennessee": ((36.1665, -86.7713), False, "Nissan Stadium"),
-            "washington": ((38.9077, -76.8645), False, "FedExField")
-        }
-        
-        return stadiums.get(city.lower()) 
+        except Exception as e:
+            print(f"Error getting stadium weather: {e}")
+            print(f"Full error: {repr(e)}")
+            return None 

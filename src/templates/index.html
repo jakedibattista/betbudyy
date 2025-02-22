@@ -50,6 +50,21 @@
             content: " ↓";
             color: red;
         }
+        .game-preview {
+            background: #f8f9fa;
+            padding: 15px;
+            margin: 10px 0;
+            border-left: 4px solid #007bff;
+            border-radius: 4px;
+        }
+        .game-preview h4 {
+            color: #007bff;
+            margin-top: 0;
+        }
+        .game-preview p {
+            line-height: 1.5;
+            margin-bottom: 0;
+        }
     </style>
 </head>
 <body>
@@ -133,6 +148,14 @@
                                 <h3>${game.away_team} @ ${game.home_team}</h3>
                                 <p>Start Time: ${formatDateTime(game.start_time)}</p>
                                 
+                                <!-- Game Preview -->
+                                ${game.preview ? `
+                                    <div class="game-preview">
+                                        <h4>Game Preview</h4>
+                                        <p>${game.preview}</p>
+                                    </div>
+                                ` : ''}
+                                
                                 <!-- Moneyline Odds -->
                                 <h4>Moneyline</h4>
                                 <table class="odds-table">
@@ -198,6 +221,65 @@
                                         <td>${game.odds.totals.under.book}</td>
                                     </tr>
                                 </table>
+
+                                <!-- Weather Information -->
+                                ${game.weather ? `
+                                    <h4>Stadium & Weather</h4>
+                                    <div class="weather-info">
+                                        <p><strong>Stadium:</strong> ${game.weather.stadium}</p>
+                                        ${game.weather.is_indoor ? `
+                                            <p>Indoor Stadium - Climate Controlled</p>
+                                        ` : `
+                                            <p><strong>Temperature:</strong> ${game.weather.temperature}°F</p>
+                                            <p><strong>Wind:</strong> ${game.weather.wind_speed} mph</p>
+                                            <p><strong>Conditions:</strong> ${game.weather.description}</p>
+                                        `}
+                                    </div>
+                                ` : ''}
+
+                                <!-- Injury Reports -->
+                                <h4>Team Injuries</h4>
+                                <div class="injury-reports">
+                                    <div class="team-injuries">
+                                        <h5>${game.home_team}</h5>
+                                        ${game.injuries.home && game.injuries.home.length ? `
+                                            <table class="injury-table">
+                                                <tr>
+                                                    <th>Player</th>
+                                                    <th>Position</th>
+                                                    <th>Status</th>
+                                                </tr>
+                                                ${game.injuries.home.map(injury => `
+                                                    <tr>
+                                                        <td>${injury.name}</td>
+                                                        <td>${injury.position}</td>
+                                                        <td class="injury-status">${injury.status}</td>
+                                                    </tr>
+                                                `).join('')}
+                                            </table>
+                                        ` : '<p>No reported injuries</p>'}
+                                    </div>
+                                    
+                                    <div class="team-injuries">
+                                        <h5>${game.away_team}</h5>
+                                        ${game.injuries.away && game.injuries.away.length ? `
+                                            <table class="injury-table">
+                                                <tr>
+                                                    <th>Player</th>
+                                                    <th>Position</th>
+                                                    <th>Status</th>
+                                                </tr>
+                                                ${game.injuries.away.map(injury => `
+                                                    <tr>
+                                                        <td>${injury.name}</td>
+                                                        <td>${injury.position}</td>
+                                                        <td class="injury-status">${injury.status}</td>
+                                                    </tr>
+                                                `).join('')}
+                                            </table>
+                                        ` : '<p>No reported injuries</p>'}
+                                    </div>
+                                </div>
                             </div>
                         `).join('')}
                     `;

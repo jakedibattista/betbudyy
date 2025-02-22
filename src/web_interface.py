@@ -3,10 +3,17 @@ from bet_parser.parser import BetParser
 import asyncio
 from services.odds_service import OddsService
 from datetime import datetime
+from services.weather_service import WeatherService
+from services.sportradar_service import SportradarService
+from time import sleep
+from services.preview_service import PreviewService
 
 app = Flask(__name__)
 parser = BetParser()
 odds_service = OddsService()
+weather_service = WeatherService()
+sportradar_service = SportradarService()
+preview_service = PreviewService()
 
 @app.route('/')
 def home():
@@ -172,12 +179,47 @@ async def available_games():
                             'book': total['book']
                         }
 
+                # Get weather for outdoor sports
+                weather = None
+                if sport in ['americanfootball_nfl', 'baseball_mlb']:
+                    weather = await weather_service.get_stadium_weather(
+                        game['home_team'], 
+                        game['commence_time']
+                    )
+                
+                # Get injury reports with delay between requests
+                try:
+                    home_injuries = await sportradar_service.get_injuries(game['home_team'])
+                    await asyncio.sleep(1)  # Wait 1 second between requests
+                    away_injuries = await sportradar_service.get_injuries(game['away_team'])
+                    await asyncio.sleep(1)  # Wait 1 second between requests
+                except Exception as e:
+                    print(f"Error fetching injuries: {e}")
+                    home_injuries = None
+                    away_injuries = None
+                
+                # Get game preview
+                preview = await preview_service.get_game_preview({
+                    "home_team": game['home_team'],
+                    "away_team": game['away_team'],
+                    "injuries": {
+                        "home": home_injuries,
+                        "away": away_injuries
+                    }
+                })
+                
                 games.append({
                     "id": game_id,
                     "home_team": game['home_team'],
                     "away_team": game['away_team'],
                     "start_time": game['commence_time'],
                     "sport": game['sport_title'],
+                    "weather": weather,
+                    "injuries": {
+                        "home": home_injuries,
+                        "away": away_injuries
+                    },
+                    "preview": preview,
                     "odds": {
                         "moneyline": {
                             "home": sorted(home_odds, key=lambda x: x['odds'], reverse=True)[:3],
@@ -219,8 +261,59 @@ async def available_games():
             "message": str(e)
         })
 
+@app.route('/test_injuries/<team>')
+async def test_injuries(team):
+    try:
+        print(f"Testing injury report for: {team}")
+        injuries = await sportradar_service.get_injuries(team)
+        return jsonify({
+            "status": "success" if injuries else "error",
+            "team": team,
+            "injuries": injuries or [],
+            "injury_count": len(injuries) if injuries else 0
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e),
+            "details": repr(e)
+        })
+
+@app.route('/test_weather/<team>')
+async def test_weather(team):
+    try:
+        print(f"Testing weather for: {team}")
+        # Use current time for testing
+        current_time = datetime.now().isoformat()
+        weather = await weather_service.get_stadium_weather(team, current_time)
+        
+        return jsonify({
+            "status": "success" if weather else "error",
+            "team": team,
+            "weather": weather,
+            "details": {
+                "stadium": weather.get("stadium") if weather else None,
+                "is_indoor": weather.get("is_indoor") if weather else None,
+                "raw_response": weather
+            }
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e),
+            "details": repr(e)
+        })
+
 def run_app():
-    app.run(debug=True, port=5001)
+    # Try ports 5001-5010 until we find an open one
+    for port in range(5001, 5011):
+        try:
+            print(f"Attempting to start server on port {port}...")
+            app.run(debug=True, port=port)
+            break
+        except OSError as e:
+            print(f"Port {port} is in use, trying next port...")
+            continue
 
 if __name__ == '__main__':
     run_app() 
