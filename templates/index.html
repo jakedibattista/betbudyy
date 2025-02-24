@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>NBA Games & Injuries</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .game-card {
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .injury-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 10px 0;
+        }
+        .injury-table th, .injury-table td {
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+        .odds {
+            color: #2a5298;
+            font-weight: bold;
+        }
+        .preview-section {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+            font-style: italic;
+            color: #2a5298;
+            line-height: 1.4;
+            border-left: 4px solid #1e3c72;
+        }
+    </style>
+</head>
+<body>
+    <h1>NBA Games & Injuries</h1>
+    <div id="games-container">Loading...</div>
+
+    <script>
+        async function loadGames() {
+            try {
+                const response = await fetch('/available_games');
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    const container = document.getElementById('games-container');
+                    container.innerHTML = data.games.map(game => `
+                        <div class="game-card">
+                            <h2>${game.away_team} @ ${game.home_team}</h2>
+                            <p>Start Time: ${new Date(game.start_time).toLocaleString()}</p>
+                            
+                            <h3>Odds:</h3>
+                            <p>
+                                ${game.home_team}: <span class="odds">${game.odds.moneyline.home[0]?.odds || 'N/A'}</span>
+                                | 
+                                ${game.away_team}: <span class="odds">${game.odds.moneyline.away[0]?.odds || 'N/A'}</span>
+                            </p>
+
+                            <h3>AI Preview:</h3>
+                            <div class="preview-section">
+                                ${game.preview || 'Preview not available'}
+                            </div>
+
+                            <h3>Injuries:</h3>
+                            <h4>${game.home_team}</h4>
+                            ${generateInjuryTable(game.injuries.home_team)}
+                            
+                            <h4>${game.away_team}</h4>
+                            ${generateInjuryTable(game.injuries.away_team)}
+                        </div>
+                    `).join('');
+                } else {
+                    document.getElementById('games-container').innerHTML = 
+                        `<p>Error: ${data.message || 'Failed to load games'}</p>`;
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                document.getElementById('games-container').innerHTML = 
+                    `<p>Error loading games: ${error.message}</p>`;
+            }
+        }
+
+        function generateInjuryTable(injuries) {
+            if (!injuries || injuries.length === 0) {
+                return '<p>No injuries reported</p>';
+            }
+
+            // Check for special messages
+            if (injuries.length === 1 && (
+                injuries[0].player === "No injuries" || 
+                injuries[0].player === "Team not found"
+            )) {
+                return `<p>${injuries[0].player}</p>`;
+            }
+
+            return `
+                <table class="injury-table">
+                    <tr>
+                        <th>Player</th>
+                        <th>Position</th>
+                        <th>Status</th>
+                    </tr>
+                    ${injuries.map(injury => `
+                        <tr>
+                            <td>${injury.player}</td>
+                            <td>${injury.position}</td>
+                            <td>${injury.status}</td>
+                        </tr>
+                    `).join('')}
+                </table>
+            `;
+        }
+
+        // Load games when page loads
+        loadGames();
+    </script>
+</body>
+</html>

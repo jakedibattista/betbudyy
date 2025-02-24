@@ -5,10 +5,28 @@ from dotenv import load_dotenv
 from services.sportradar_service import SportradarService
 from web_interface import run_app
 
-# Load environment variables at startup
-load_dotenv()
-print("Environment variables loaded:")
-print(f"SPORTRADAR_API_KEY present: {'Yes' if os.getenv('SPORTRADAR_API_KEY') else 'No'}")
+def main():
+    # Load environment variables
+    load_dotenv()
+    
+    # Verify required environment variables
+    required_vars = [
+        "GEMINI_API_KEY",
+        "ODDS_API_KEY",
+        "SPORTRADAR_API_KEY",
+        "WEATHER_API_KEY"
+    ]
+    
+    for var in required_vars:
+        if not os.getenv(var):
+            raise ValueError(f"{var} not found in environment variables")
+        print(f"Loaded {var}: {os.getenv(var)[:10]}...")
+    
+    # Run the Flask app
+    run_app()
+
+if __name__ == "__main__":
+    main()
 
 async def main():
     # Test Sportradar API first
@@ -86,7 +104,4 @@ async def main():
                         print(f"Humidity: {bet.weather['humidity']}%")
             
         except Exception as e:
-            print(f"Error processing bet: {str(e)}")
-
-if __name__ == "__main__":
-    run_app() 
+            print(f"Error processing bet: {str(e)}") 

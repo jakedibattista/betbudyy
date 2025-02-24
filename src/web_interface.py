@@ -2,18 +2,85 @@ from flask import Flask, render_template, request, jsonify
 from bet_parser.parser import BetParser
 import asyncio
 from services.odds_service import OddsService
-from datetime import datetime
+from datetime import datetime, timedelta
 from services.weather_service import WeatherService
 from services.sportradar_service import SportradarService
 from time import sleep
 from services.preview_service import PreviewService
+from services.gemini_analysis_service import GeminiAnalysisService
+from services.injury_service import InjuryService
+import json
+from apscheduler.schedulers.background import BackgroundScheduler
+from dotenv import load_dotenv
 
-app = Flask(__name__)
+app = Flask(__name__, 
+    template_folder='../templates'  # If templates are in project root
+)
+app.config['DEBUG'] = True
+app.config['TEMPLATES_AUTO_RELOAD'] = True
 parser = BetParser()
+
+# Initialize services
+load_dotenv()
 odds_service = OddsService()
-weather_service = WeatherService()
-sportradar_service = SportradarService()
-preview_service = PreviewService()
+injury_service = InjuryService()
+gemini_service = GeminiAnalysisService()
+scheduler = BackgroundScheduler()
+
+def init_services():
+    """Initialize all services"""
+    global odds_service, injury_service, gemini_service
+    
+    print("\n=== Initializing Services ===")
+    try:
+        odds_service = OddsService()
+        print("✓ Odds service initialized")
+        
+        injury_service = InjuryService()
+        
+        # Do initial injury database update
+        asyncio.run(injury_service.update_injuries())
+        print("✓ Injury database updated")
+        print("✓ Injury service initialized")
+        
+        # Schedule future updates
+        scheduler.add_job(
+            func=lambda: asyncio.run(injury_service.update_injuries()),
+            trigger='interval',
+            hours=6,
+            next_run_time=datetime.now() + timedelta(hours=6)
+        )
+        scheduler.start()
+        print("✓ Injury update scheduler started")
+            
+    except Exception as e:
+        print(f"❌ Error initializing services: {e}")
+        raise
+
+def run_app():
+    """Run the Flask application"""
+    try:
+        # Initialize services before running the app
+        init_services()
+        
+        # Try ports 5500-5510 instead
+        for port in range(5500, 5511):
+            try:
+                print(f"\nAttempting to start server on port {port}...")
+                app.run(debug=True, port=port, host='0.0.0.0')
+                break
+            except OSError:
+                print(f"Port {port} is in use, trying next port...")
+                continue
+                
+    except Exception as e:
+        print(f"❌ Fatal error starting server: {e}")
+        scheduler.shutdown()
+        raise
+
+# Shutdown scheduler when app exits
+import atexit
+atexit.register(lambda: scheduler.shutdown())
 
 @app.route('/')
 def home():
@@ -79,187 +146,73 @@ def available_sports():
 @app.route('/available_games')
 async def available_games():
     try:
-        sport = request.args.get('sport')
-        odds = await odds_service.get_odds(sport)
-        if odds and len(odds) > 0:
-            games = []
-            for game in odds:
-                game_id = game['id']
-                current_time = datetime.now().isoformat()
-                
-                # Process moneyline odds
-                home_odds = []
-                away_odds = []
-                # Process spread odds
-                spreads = []
-                # Process totals
-                totals = []
-                
-                for book in game.get('bookmakers', []):
-                    for market in book.get('markets', []):
-                        if market['key'] == 'h2h':
-                            # Process moneyline odds as before
-                            for outcome in market['outcomes']:
-                                if outcome['name'] == game['home_team']:
-                                    home_odds.append({
-                                        'book': book['key'],
-                                        'odds': outcome['price'],
-                                        'timestamp': current_time
-                                    })
-                                else:
-                                    away_odds.append({
-                                        'book': book['key'],
-                                        'odds': outcome['price'],
-                                        'timestamp': current_time
-                                    })
-                        elif market['key'] == 'spreads':
-                            # Process point spreads
-                            spreads.append({
-                                'book': book['key'],
-                                'home': next((o for o in market['outcomes'] 
-                                            if o['name'] == game['home_team']), None),
-                                'away': next((o for o in market['outcomes'] 
-                                            if o['name'] == game['away_team']), None),
-                                'timestamp': current_time
-                            })
-                        elif market['key'] == 'totals':
-                            # Process over/under totals
-                            totals.append({
-                                'book': book['key'],
-                                'total': market['outcomes'][0]['point'],
-                                'over_odds': next((o['price'] for o in market['outcomes'] 
-                                                 if o['name'] == 'Over'), None),
-                                'under_odds': next((o['price'] for o in market['outcomes'] 
-                                                  if o['name'] == 'Under'), None),
-                                'timestamp': current_time
-                            })
-                
-                # Get best spread for each team (lowest spread with best odds)
-                best_spreads = {
-                    'home': None,
-                    'away': None
-                }
-                for spread in spreads:
-                    if spread['home'] and spread['away']:
-                        if (not best_spreads['home'] or 
-                            (spread['home']['point'] > best_spreads['home']['point'] or 
-                             (spread['home']['point'] == best_spreads['home']['point'] and 
-                              spread['home']['price'] > best_spreads['home']['price']))):
-                            best_spreads['home'] = {
-                                'point': spread['home']['point'],
-                                'price': spread['home']['price'],
-                                'book': spread['book']
-                            }
-                        if (not best_spreads['away'] or 
-                            (spread['away']['point'] > best_spreads['away']['point'] or 
-                             (spread['away']['point'] == best_spreads['away']['point'] and 
-                              spread['away']['price'] > best_spreads['away']['price']))):
-                            best_spreads['away'] = {
-                                'point': spread['away']['point'],
-                                'price': spread['away']['price'],
-                                'book': spread['book']
-                            }
+        odds = await odds_service.get_odds('basketball_nba')
+        
+        if not odds:
+            return jsonify({"status": "error", "message": "No games found"})
 
-                # Get best total (highest over odds and lowest under odds)
-                best_total = {
-                    'over': None,
-                    'under': None
-                }
-                for total in totals:
-                    if (not best_total['over'] or total['over_odds'] > best_total['over']['odds']):
-                        best_total['over'] = {
-                            'total': total['total'],
-                            'odds': total['over_odds'],
-                            'book': total['book']
-                        }
-                    if (not best_total['under'] or total['under_odds'] > best_total['under']['odds']):
-                        best_total['under'] = {
-                            'total': total['total'],
-                            'odds': total['under_odds'],
-                            'book': total['book']
-                        }
+        games = []
+        for game in odds:
+            home_team = game['home_team']
+            away_team = game['away_team']
+            
+            # Get injuries
+            home_injuries = await injury_service.get_injuries(home_team)
+            away_injuries = await injury_service.get_injuries(away_team)
 
-                # Get weather for outdoor sports
-                weather = None
-                if sport in ['americanfootball_nfl', 'baseball_mlb']:
-                    weather = await weather_service.get_stadium_weather(
-                        game['home_team'], 
-                        game['commence_time']
-                    )
-                
-                # Get injury reports with delay between requests
-                try:
-                    home_injuries = await sportradar_service.get_injuries(game['home_team'])
-                    await asyncio.sleep(1)  # Wait 1 second between requests
-                    away_injuries = await sportradar_service.get_injuries(game['away_team'])
-                    await asyncio.sleep(1)  # Wait 1 second between requests
-                except Exception as e:
-                    print(f"Error fetching injuries: {e}")
-                    home_injuries = None
-                    away_injuries = None
-                
-                # Get game preview
-                preview = await preview_service.get_game_preview({
-                    "home_team": game['home_team'],
-                    "away_team": game['away_team'],
-                    "injuries": {
-                        "home": home_injuries,
-                        "away": away_injuries
-                    }
-                })
-                
-                games.append({
-                    "id": game_id,
-                    "home_team": game['home_team'],
-                    "away_team": game['away_team'],
-                    "start_time": game['commence_time'],
-                    "sport": game['sport_title'],
-                    "weather": weather,
-                    "injuries": {
-                        "home": home_injuries,
-                        "away": away_injuries
-                    },
-                    "preview": preview,
-                    "odds": {
-                        "moneyline": {
-                            "home": sorted(home_odds, key=lambda x: x['odds'], reverse=True)[:3],
-                            "away": sorted(away_odds, key=lambda x: x['odds'], reverse=True)[:3]
-                        },
-                        "spreads": best_spreads,
-                        "totals": best_total
-                    }
-                })
-            
-            # Sort games if requested
-            sort_by = request.args.get('sort')
-            if sort_by == 'time':
-                games.sort(key=lambda x: x['start_time'])
-            elif sort_by == 'odds':
-                # Sort by the best available odds for either team
-                games.sort(key=lambda x: x['odds'], reverse=True)
-            
-            # Filter by team if requested
-            team_filter = request.args.get('team', '').lower()
-            if team_filter:
-                games = [g for g in games if team_filter in g['home_team'].lower() or 
-                        team_filter in g['away_team'].lower()]
-            
-            return jsonify({
-                "status": "success",
-                "sport": game['sport_title'],
-                "game_count": len(games),
-                "games": games
+            # Get AI Preview
+            preview = await gemini_service.analyze_game({
+                'home_team': home_team,
+                'away_team': away_team,
+                'home_injuries': home_injuries,
+                'away_injuries': away_injuries,
+                'odds': {
+                    'home': game.get('bookmakers', [{}])[0].get('markets', [{}])[0].get('outcomes', [{}])[0].get('price'),
+                    'away': game.get('bookmakers', [{}])[0].get('markets', [{}])[0].get('outcomes', [{}])[1].get('price')
+                }
             })
-            
+
+            game_data = {
+                'home_team': home_team,
+                'away_team': away_team,
+                'start_time': game['commence_time'],
+                'injuries': {
+                    'home_team': home_injuries,
+                    'away_team': away_injuries
+                },
+                'odds': {
+                    'moneyline': {'home': [], 'away': []}
+                },
+                'preview': preview
+            }
+
+            # Add moneyline odds
+            for bookmaker in game.get('bookmakers', []):
+                for market in bookmaker.get('markets', []):
+                    if market['key'] == 'h2h':
+                        for outcome in market['outcomes']:
+                            if outcome['name'] == home_team:
+                                game_data['odds']['moneyline']['home'].append({
+                                    'book': bookmaker['key'],
+                                    'odds': outcome['price']
+                                })
+                            else:
+                                game_data['odds']['moneyline']['away'].append({
+                                    'book': bookmaker['key'],
+                                    'odds': outcome['price']
+                                })
+
+            games.append(game_data)
+
         return jsonify({
-            "status": "error",
-            "message": "No games found"
+            "status": "success",
+            "game_count": len(games),
+            "games": games
         })
+
     except Exception as e:
-        return jsonify({
-            "status": "error",
-            "message": str(e)
-        })
+        print(f"Error: {e}")
+        return jsonify({"status": "error", "message": str(e)})
 
 @app.route('/test_injuries/<team>')
 async def test_injuries(team):
@@ -303,17 +256,6 @@ async def test_weather(team):
             "message": str(e),
             "details": repr(e)
         })
-
-def run_app():
-    # Try ports 5001-5010 until we find an open one
-    for port in range(5001, 5011):
-        try:
-            print(f"Attempting to start server on port {port}...")
-            app.run(debug=True, port=port)
-            break
-        except OSError as e:
-            print(f"Port {port} is in use, trying next port...")
-            continue
 
 if __name__ == '__main__':
     run_app() 

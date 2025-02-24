@@ -1,7 +1,7 @@
 import aiohttp
 from typing import Dict, Any, Optional
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 class SportradarService:
     def __init__(self):
@@ -12,8 +12,11 @@ class SportradarService:
             else:
                 print(f"Loaded API key: {self.api_key[:5]}...")
             
-            # Use trial API endpoint
-            self.base_url = "https://api.sportradar.us/nfl/trial/v7/en"
+            # Update base URL to use NBA trial API
+            self.base_url = "https://api.sportradar.us"
+            # Cache for injury data
+            self._injury_cache = {}
+            self._cache_duration = timedelta(minutes=15)  # Cache for 15 minutes
         except Exception as e:
             print(f"Error initializing SportradarService: {e}")
         
@@ -24,7 +27,7 @@ class SportradarService:
             
             async with aiohttp.ClientSession() as session:
                 # First get the schedule to find team IDs
-                schedule_url = f"{self.base_url}/games/2024/PST/schedule.json"
+                schedule_url = f"{self.base_url}/nfl/trial/v7/en/games/2024/PST/schedule.json"
                 print(f"Getting schedule to find team IDs...")
                 
                 async with session.get(schedule_url, params=params) as schedule_response:
@@ -52,8 +55,8 @@ class SportradarService:
                     print(f"Found team IDs - Home: {home_id}, Away: {away_id}")
                     
                     # Now get team profiles using IDs
-                    home_url = f"{self.base_url}/teams/{home_id}/profile.json"
-                    away_url = f"{self.base_url}/teams/{away_id}/profile.json"
+                    home_url = f"{self.base_url}/nfl/trial/v7/en/teams/{home_id}/profile.json"
+                    away_url = f"{self.base_url}/nfl/trial/v7/en/teams/{away_id}/profile.json"
                     
                     print(f"Getting team profiles...")
                     
@@ -165,7 +168,7 @@ class SportradarService:
             
             async with aiohttp.ClientSession() as session:
                 # Use the league hierarchy endpoint - most basic endpoint
-                url = f"{self.base_url}/league/hierarchy.json"
+                url = f"{self.base_url}/nfl/trial/v7/en/league/hierarchy.json"
                 print(f"Testing API with league hierarchy endpoint...")
                 print(f"URL: {url}")
                 print(f"API Key: {self.api_key[:10]}...")  # Show first 10 chars to verify key
@@ -184,3 +187,157 @@ class SportradarService:
             print(f"Error accessing Sportradar API: {str(e)}")
             print(f"Full error: {repr(e)}")
             return None 
+
+    def _normalize_team_name(self, team_name: str) -> str:
+        """Normalize team name to match Sportradar format"""
+        # Common variations to standardize
+        replacements = {
+            "76ers": "Philadelphia 76ers",
+            "Sixers": "Philadelphia 76ers",
+            "Blazers": "Portland Trail Blazers",
+            "Wolves": "Minnesota Timberwolves",
+            "Cavs": "Cleveland Cavaliers",
+            "Mavs": "Dallas Mavericks"
+        }
+
+        # First check direct replacements
+        for key, value in replacements.items():
+            if key in team_name:
+                return value
+
+        # Handle special cases
+        if "Portland" in team_name:
+            return "Portland Trail Blazers"
+        if "Golden State" in team_name:
+            return "Golden State Warriors"
+        if "LA " in team_name or "Los Angeles" in team_name:
+            if "Clippers" in team_name:
+                return "Los Angeles Clippers"
+            if "Lakers" in team_name:
+                return "Los Angeles Lakers"
+
+        # Add city if missing
+        team_cities = {
+            "Jazz": "Utah Jazz",
+            "Heat": "Miami Heat",
+            "Hornets": "Charlotte Hornets",
+            "Rockets": "Houston Rockets",
+            "Warriors": "Golden State Warriors",
+            "Nets": "Brooklyn Nets",
+            "Knicks": "New York Knicks",
+            "Celtics": "Boston Celtics",
+            "Bulls": "Chicago Bulls",
+            "Suns": "Phoenix Suns"
+        }
+        
+        for key, value in team_cities.items():
+            if key in team_name:
+                return value
+
+        return team_name
+
+    def _get_team_id(self, team_name: str) -> Optional[str]:
+        """Convert team name to Sportradar ID"""
+        # First normalize the team name
+        normalized_name = self._normalize_team_name(team_name)
+        print(f"Normalized team name: {team_name} -> {normalized_name}")
+        
+        # NBA team IDs from Sportradar documentation
+        team_ids = {
+            # Eastern Conference
+            "Boston Celtics": "583eccfa-fb46-11e1-82cb-f4ce4684ea4c",
+            "Brooklyn Nets": "583ec9d6-fb46-11e1-82cb-f4ce4684ea4c",
+            "New York Knicks": "583ec70e-fb46-11e1-82cb-f4ce4684ea4c",
+            "Philadelphia 76ers": "583ec87d-fb46-11e1-82cb-f4ce4684ea4c",
+            "Toronto Raptors": "583ecda6-fb46-11e1-82cb-f4ce4684ea4c",
+            "Chicago Bulls": "583ec5fd-fb46-11e1-82cb-f4ce4684ea4c",
+            "Cleveland Cavaliers": "583ec773-fb46-11e1-82cb-f4ce4684ea4c",
+            "Detroit Pistons": "583ec928-fb46-11e1-82cb-f4ce4684ea4c",
+            "Indiana Pacers": "583ec7cd-fb46-11e1-82cb-f4ce4684ea4c",
+            "Milwaukee Bucks": "583ecefd-fb46-11e1-82cb-f4ce4684ea4c",
+            "Atlanta Hawks": "583ecb3a-fb46-11e1-82cb-f4ce4684ea4c",
+            "Charlotte Hornets": "583ec97e-fb46-11e1-82cb-f4ce4684ea4c",
+            "Miami Heat": "583ecea6-fb46-11e1-82cb-f4ce4684ea4c",
+            "Orlando Magic": "583ed157-fb46-11e1-82cb-f4ce4684ea4c",
+            "Washington Wizards": "583ec8d4-fb46-11e1-82cb-f4ce4684ea4c",
+            
+            # Western Conference
+            "Denver Nuggets": "583ed102-fb46-11e1-82cb-f4ce4684ea4c",
+            "Minnesota Timberwolves": "583eca2f-fb46-11e1-82cb-f4ce4684ea4c",
+            "Oklahoma City Thunder": "583ecfff-fb46-11e1-82cb-f4ce4684ea4c",
+            "Portland Trail Blazers": "583ed056-fb46-11e1-82cb-f4ce4684ea4c",
+            "Utah Jazz": "583ece50-fb46-11e1-82cb-f4ce4684ea4c",
+            "Golden State Warriors": "583ec825-fb46-11e1-82cb-f4ce4684ea4c",
+            "Los Angeles Clippers": "583ecdfb-fb46-11e1-82cb-f4ce4684ea4c",
+            "Los Angeles Lakers": "583ecae2-fb46-11e1-82cb-f4ce4684ea4c",
+            "Phoenix Suns": "583ecfa8-fb46-11e1-82cb-f4ce4684ea4c",
+            "Sacramento Kings": "583ed0ac-fb46-11e1-82cb-f4ce4684ea4c",
+            "Dallas Mavericks": "583ecf50-fb46-11e1-82cb-f4ce4684ea4c",
+            "Houston Rockets": "583ecb8f-fb46-11e1-82cb-f4ce4684ea4c",
+            "Memphis Grizzlies": "583eca88-fb46-11e1-82cb-f4ce4684ea4c",
+            "New Orleans Pelicans": "583ecc9a-fb46-11e1-82cb-f4ce4684ea4c",
+            "San Antonio Spurs": "583ecd4f-fb46-11e1-82cb-f4ce4684ea4c"
+        }
+        
+        team_id = team_ids.get(normalized_name)
+        if not team_id:
+            print(f"No team ID found for: {normalized_name}")
+            # Try to find a partial match
+            for known_name, known_id in team_ids.items():
+                if normalized_name.lower() in known_name.lower():
+                    print(f"Found partial match: {known_name}")
+                    return known_id
+        return team_id
+
+    async def get_injuries(self, team: str) -> Optional[Dict[str, Any]]:
+        """Get team injury report with caching"""
+        try:
+            # Check cache first
+            if team in self._injury_cache:
+                cache_time, cache_data = self._injury_cache[team]
+                if datetime.now() - cache_time < self._cache_duration:
+                    print(f"Using cached injury data for {team}")
+                    return cache_data
+
+            print(f"\nFetching injuries for: {team}")
+            team_id = self._get_team_id(team)
+            if not team_id:
+                print(f"Could not find team ID for: {team}")
+                return None
+                
+            url = f"{self.base_url}/nba/trial/v8/en/teams/{team_id}/injuries.json"
+            params = {"api_key": self.api_key}
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params) as response:
+                    if response.status == 429:  # Rate limit
+                        print("Rate limit hit, using cached data if available")
+                        return self._injury_cache.get(team, (None, None))[1]
+                        
+                    if response.status != 200:
+                        return None
+                        
+                    data = await response.json()
+                    injuries = self._format_injuries(data)
+                    
+                    # Cache the result
+                    self._injury_cache[team] = (datetime.now(), injuries)
+                    return injuries
+                    
+        except Exception as e:
+            print(f"Error getting injuries: {str(e)}")
+            return None
+            
+    def _format_injuries(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Format injury data into standardized structure"""
+        injuries = []
+        for player in data.get('players', []):
+            if player.get('injuries'):
+                injuries.append({
+                    "name": player.get('name'),
+                    "position": player.get('position'),
+                    "status": player.get('injuries')[0].get('status'),
+                    "description": player.get('injuries')[0].get('desc'),
+                    "practice_status": player.get('injuries')[0].get('practice_status')
+                })
+        return injuries 

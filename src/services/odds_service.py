@@ -19,22 +19,16 @@ class OddsService:
                 return await response.json()
     
     SUPPORTED_SPORTS = {
-        'NBA': 'basketball_nba',
-        'NHL': 'icehockey_nhl',
-        'MLB': 'baseball_mlb'
+        'NBA': 'basketball_nba'  # Only support NBA for now
     }
     
     async def get_odds(self, sport_key: str = None) -> Optional[Dict[str, Any]]:
-        """Get odds for a specific sport"""
+        """Get odds for NBA games"""
         try:
-            if sport_key and sport_key not in self.SUPPORTED_SPORTS.values():
-                print(f"Unsupported sport: {sport_key}")
-                return None
-                
-            sport = sport_key or self.SUPPORTED_SPORTS['NBA']  # Default to NBA
+            sport = 'basketball_nba'  # Always use NBA
             
             async with aiohttp.ClientSession() as session:
-                url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds"
+                url = f"{self.base_url}/{sport}/odds"
                 params = {
                     "apiKey": self.api_key,
                     "regions": "us",
@@ -43,14 +37,14 @@ class OddsService:
                     "oddsFormat": "american"
                 }
                 
-                print(f"Fetching odds for {sport}...")
+                print(f"Fetching NBA odds...")
                 async with session.get(url, params=params) as response:
                     if response.status != 200:
                         print(f"Error: {await response.text()}")
                         return None
                     
                     data = await response.json()
-                    print(f"Found {len(data)} games for {sport}")
+                    print(f"Found {len(data)} NBA games")
                     return data
                     
         except Exception as e:
